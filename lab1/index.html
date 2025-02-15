@@ -7,6 +7,9 @@
 <body>
 <canvas id="glcanvas1" width="600" height="400" style="border: 1px solid #000;"></canvas>
 <canvas id="glcanvas2" width="600" height="400" style="border: 1px solid #000;"></canvas>
+<canvas id="glcanvas3" width="600" height="400" style="border: 1px solid #000;"></canvas>
+<button id="button">Изменить режим отображения</button>
+<p id="textField" onclick="changeType"></p>
 <script>
 
     // Исходный код вершинного шейдера
@@ -19,6 +22,7 @@
       void main(void) {
         gl_Position = vec4(aVertexPosition, 0.0, 1.0);
         vColor = aVertexColor;
+        gl_PointSize = 10.0;
       }
     `;
 
@@ -32,6 +36,7 @@
            gl_FragColor = vColor;
         }
     `;
+
 
     addEventListener("load", (event) => main());
 
@@ -50,14 +55,27 @@
         return gl;
     }
 
+    let textField
+    let id = 0
+    let types = []
+
     function main() {
         drawCanvas1()
         drawCanvas2()
-
+        drawCanvas3()
+        textField = document.getElementById("textField");
+        types = ["POINTS", "LINE_STRIP", "LINE_LOOP", "LINES", "TRIANGLE_STRIP", "TRIANGLE_FAN", "TRIANGLES"]
+        document.getElementById("button").addEventListener("click", () => changeType())
     }
 
-    function drawCanvas1()
-    {
+    function changeType() {
+        id += 1
+        id = id % types.length
+        textField.textContent = types[id]
+        drawCanvas3()
+    }
+
+    function drawCanvas1() {
         const canvas = document.getElementById('glcanvas1');
         const gl = initWebGL(canvas);
 
@@ -81,9 +99,9 @@
             0.9, -0.9
         ]);
         const triangleVerticesColor = new Float32Array([
-            1,0,0,1,
-            0,1,0,1,
-            0,0,1,1
+            1, 0, 0, 1,
+            0, 1, 0, 1,
+            0, 0, 1, 1
         ]);
 
         // Создаем и заполняем буфер для треугольника
@@ -96,11 +114,10 @@
         gl.bufferData(gl.ARRAY_BUFFER, triangleVerticesColor, gl.STATIC_DRAW);
 
 
-
         gl.clearColor(0.0, 0.0, 0.0, 1.0);
         gl.enable(gl.DEPTH_TEST);
         gl.depthFunc(gl.LEQUAL);
-        gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);
+        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
         // Рисуем треугольник (красный)
         gl.bindBuffer(gl.ARRAY_BUFFER, triangleBuffer);
@@ -112,8 +129,8 @@
         gl.drawArrays(gl.TRIANGLES, 0, 3);
 
     }
-    function drawCanvas2()
-    {
+
+    function drawCanvas2() {
         const canvas = document.getElementById('glcanvas2');
         const gl = initWebGL(canvas);
 
@@ -141,10 +158,10 @@
         ]);
 
         const squareVerticesColor = new Float32Array([
-            1,0,0,1,
-            0,1,0,1,
-            0,0,1,1,
-            1,0,0,1
+            1, 0, 0, 1,
+            0, 1, 0, 1,
+            0, 0, 1, 1,
+            1, 0, 0, 1
         ]);
 
         // Создаем и заполняем буфер для квадрата
@@ -159,7 +176,7 @@
         gl.clearColor(0.0, 0.0, 0.0, 1.0);
         gl.enable(gl.DEPTH_TEST);
         gl.depthFunc(gl.LEQUAL);
-        gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);
+        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
 
         // Рисуем квадрат (синий)
@@ -170,6 +187,95 @@
         gl.vertexAttribPointer(vertexColorAttribute, 4, gl.FLOAT, false, 0, 0);
 
         gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    }
+
+    function drawCanvas3() {
+        const canvas = document.getElementById('glcanvas3');
+        const gl = initWebGL(canvas);
+
+        if (!gl) {
+            alert("Ваш браузер не поддерживает WebGL.");
+            return
+        }
+
+        const shaderProgram = initShaderProgram(gl, vsSource, fsSource);
+        gl.useProgram(shaderProgram);
+
+        // Получаем местоположение атрибута и uniform-переменной
+        const vertexPositionAttribute = gl.getAttribLocation(shaderProgram, 'aVertexPosition');
+        gl.enableVertexAttribArray(vertexPositionAttribute);
+
+        const vertexColorAttribute = gl.getAttribLocation(shaderProgram, 'aVertexColor');
+        gl.enableVertexAttribArray(vertexColorAttribute);
+
+        // Квадрат (синий). Используем TRIANGLE_STRIP (две треугольные поверхности).
+        const squareVertices = new Float32Array([
+            0, 1,
+            0.5, 0.8660,
+            0.5, -0.8660,
+            -0.5, -0.8660,
+
+            -1, 0,
+
+
+            -0.5, 0.8660
+        ]);
+
+        const squareVerticesColor = new Float32Array([
+            0, 1, 0, 1,
+            1, 0, 0, 1,
+            0, 1, 0, 1,
+            0, 0, 1, 1,
+            1, 0, 0, 1,
+            1, 1, 1, 1
+        ]);
+
+        // Создаем и заполняем буфер для квадрата
+        const squareBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, squareBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, squareVertices, gl.STATIC_DRAW);
+
+        const squareColorBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, squareColorBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, squareVerticesColor, gl.STATIC_DRAW);
+
+        gl.clearColor(0.0, 0.0, 0.0, 1.0);
+        gl.enable(gl.DEPTH_TEST);
+        gl.depthFunc(gl.LEQUAL);
+        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+
+        // Рисуем квадрат (синий)
+        gl.bindBuffer(gl.ARRAY_BUFFER, squareBuffer);
+        gl.vertexAttribPointer(vertexPositionAttribute, 2, gl.FLOAT, false, 0, 0);
+
+        gl.bindBuffer(gl.ARRAY_BUFFER, squareColorBuffer);
+        gl.vertexAttribPointer(vertexColorAttribute, 4, gl.FLOAT, false, 0, 0);
+
+        switch (id) {
+            case 0:
+                gl.drawArrays(gl.POINTS, 0, 6);
+                break;
+            case 1:
+                gl.drawArrays(gl.LINE_STRIP, 0, 6);
+                break;
+            case 2:
+                gl.drawArrays(gl.LINE_LOOP, 0, 6);
+                break;
+            case 3:
+                gl.drawArrays(gl.LINES, 0, 6);
+                break;
+            case 4:
+                gl.drawArrays(gl.TRIANGLE_STRIP, 0, 6);
+                break;
+            case 5:
+                gl.drawArrays(gl.TRIANGLE_FAN, 0, 6);
+                break;
+            case 6:
+                gl.drawArrays(gl.TRIANGLES, 0, 6);
+                break;
+
+        }
     }
 
 
