@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>WebGL: Квадрат и Треугольник</title>
+</head>
+<body>
+<canvas id="glcanvas1" width="600" height="400" style="border: 1px solid #000;"></canvas>
+<canvas id="glcanvas2" width="600" height="400" style="border: 1px solid #000;"></canvas>
+<script>
+
+    // Исходный код вершинного шейдера
+    const vsSource = `
+      attribute vec2 aVertexPosition;
+      attribute vec4 aVertexColor;
+
+      varying lowp vec4 vColor;
+
+      void main(void) {
+        gl_Position = vec4(aVertexPosition, 0.0, 1.0);
+        vColor = aVertexColor;
+      }
+    `;
+
+    // Исходный код фрагментного шейдера
+    const fsSource = `
+        #ifdef GL_ES
+        precision highp float;
+        #endif
+        varying lowp vec4 vColor;
+        void main(void) {
+           gl_FragColor = vColor;
+        }
+    `;
+
+    addEventListener("load", (event) => main());
+
+    function initWebGL(canvas) {
+        let gl = null;
+        try { // Попытаться получить стандартный контекст.
+            // Если не получится, попробовать получить экспериментальный.
+            gl = canvas.getContext("webgl2") || canvas.getContext("webgl") || canvas.getContext("experimentalwebgl");
+        } catch (e) {
+        }
+// Если мы не получили контекст GL, завершить работу
+        if (!gl) {
+            alert("Unable to initialize WebGL. Your browser may not support it.");
+            gl = null;
+        }
+        return gl;
+    }
+
+    function main() {
+        drawCanvas1()
+        drawCanvas2()
+
+    }
+
+    function drawCanvas1()
+    {
+        const canvas = document.getElementById('glcanvas1');
+        const gl = initWebGL(canvas);
+
+        if (!gl) {
+            alert("Ваш браузер не поддерживает WebGL.");
+            return
+        }
+
+        const shaderProgram = initShaderProgram(gl, vsSource, fsSource);
+        gl.useProgram(shaderProgram);
+
+        const vertexPositionAttribute = gl.getAttribLocation(shaderProgram, 'aVertexPosition');
+        gl.enableVertexAttribArray(vertexPositionAttribute);
+        const vertexColorAttribute = gl.getAttribLocation(shaderProgram, 'aVertexColor');
+        gl.enableVertexAttribArray(vertexColorAttribute);
+
+        // Треугольник (красный)
+        const triangleVertices = new Float32Array([
+            -0.9, -0.9,
+            0.0, 0.9,
+            0.9, -0.9
+        ]);
+        const triangleVerticesColor = new Float32Array([
+            1,0,0,1,
+            0,1,0,1,
+            0,0,1,1
+        ]);
+
+        // Создаем и заполняем буфер для треугольника
+        const triangleBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, triangleBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, triangleVertices, gl.STATIC_DRAW);
+
+        const triangleColorBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, triangleColorBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, triangleVerticesColor, gl.STATIC_DRAW);
+
+
+
+        gl.clearColor(0.0, 0.0, 0.0, 1.0);
+        gl.enable(gl.DEPTH_TEST);
+        gl.depthFunc(gl.LEQUAL);
+        gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);
+
+        // Рисуем треугольник (красный)
+        gl.bindBuffer(gl.ARRAY_BUFFER, triangleBuffer);
+        gl.vertexAttribPointer(vertexPositionAttribute, 2, gl.FLOAT, false, 0, 0);
+
+        gl.bindBuffer(gl.ARRAY_BUFFER, triangleColorBuffer);
+        gl.vertexAttribPointer(vertexColorAttribute, 4, gl.FLOAT, false, 0, 0);
+
+        gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+    }
+    function drawCanvas2()
+    {
+        const canvas = document.getElementById('glcanvas2');
+        const gl = initWebGL(canvas);
+
+        if (!gl) {
+            alert("Ваш браузер не поддерживает WebGL.");
+            return
+        }
+
+        const shaderProgram = initShaderProgram(gl, vsSource, fsSource);
+        gl.useProgram(shaderProgram);
+
+        // Получаем местоположение атрибута и uniform-переменной
+        const vertexPositionAttribute = gl.getAttribLocation(shaderProgram, 'aVertexPosition');
+        gl.enableVertexAttribArray(vertexPositionAttribute);
+
+        const vertexColorAttribute = gl.getAttribLocation(shaderProgram, 'aVertexColor');
+        gl.enableVertexAttribArray(vertexColorAttribute);
+
+        // Квадрат (синий). Используем TRIANGLE_STRIP (две треугольные поверхности).
+        const squareVertices = new Float32Array([
+            -0.5, 0.5,  // верхняя левая точка
+            -0.5, -0.5,  // нижняя левая точка
+            0.5, 0.5,  // верхняя правая точка
+            0.5, -0.5   // нижняя правая точка
+        ]);
+
+        const squareVerticesColor = new Float32Array([
+            1,0,0,1,
+            0,1,0,1,
+            0,0,1,1,
+            1,0,0,1
+        ]);
+
+        // Создаем и заполняем буфер для квадрата
+        const squareBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, squareBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, squareVertices, gl.STATIC_DRAW);
+
+        const squareColorBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, squareColorBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, squareVerticesColor, gl.STATIC_DRAW);
+
+        gl.clearColor(0.0, 0.0, 0.0, 1.0);
+        gl.enable(gl.DEPTH_TEST);
+        gl.depthFunc(gl.LEQUAL);
+        gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);
+
+
+        // Рисуем квадрат (синий)
+        gl.bindBuffer(gl.ARRAY_BUFFER, squareBuffer);
+        gl.vertexAttribPointer(vertexPositionAttribute, 2, gl.FLOAT, false, 0, 0);
+
+        gl.bindBuffer(gl.ARRAY_BUFFER, squareColorBuffer);
+        gl.vertexAttribPointer(vertexColorAttribute, 4, gl.FLOAT, false, 0, 0);
+
+        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    }
+
+
+    // Функция компиляции шейдера
+    function compileShader(gl, type, source) {
+        const shader = gl.createShader(type);
+        gl.shaderSource(shader, source);
+        gl.compileShader(shader);
+
+        if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+            alert('Ошибка компиляции шейдера: ' + gl.getShaderInfoLog(shader));
+            gl.deleteShader(shader);
+            return null;
+        }
+        return shader;
+    }
+
+    // Инициализация программы шейдеров
+    function initShaderProgram(gl, vsSource, fsSource) {
+        const vertexShader = compileShader(gl, gl.VERTEX_SHADER, vsSource);
+        const fragmentShader = compileShader(gl, gl.FRAGMENT_SHADER, fsSource);
+
+        const shaderProgram = gl.createProgram();
+        gl.attachShader(shaderProgram, vertexShader);
+        gl.attachShader(shaderProgram, fragmentShader);
+        gl.linkProgram(shaderProgram);
+
+        if (!gl.getProgramParameter(shaderProgram, gl.LINK_STATUS)) {
+            alert('Невозможно инициализировать шейдерную программу: ' + gl.getProgramInfoLog(shaderProgram));
+            return null;
+        }
+        return shaderProgram;
+    }
+
+
+</script>
+</body>
+</html>
