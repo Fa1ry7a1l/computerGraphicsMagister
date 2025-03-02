@@ -8,11 +8,13 @@
 <canvas id="glcanvas1" width="600" height="600" style="border: 1px solid #000;"></canvas>
 <canvas id="glcanvas2" width="600" height="600" style="border: 1px solid #000;"></canvas>
 <canvas id="glcanvas3" width="600" height="600" style="border: 1px solid #000;"></canvas>
-<p id="textField" onclick="changeType"></p>
+<canvas id="glcanvas4" width="600" height="600" style="border: 1px solid #000;"></canvas>
+<p id="textField"></p>
+<!-- glMatrix для матриц -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/gl-matrix/2.8.1/gl-matrix-min.js"></script>
 
-<script>
 
+<script>
 
 
     addEventListener("load", (event) => main());
@@ -32,14 +34,21 @@
         return gl;
     }
 
-    let textField
-    let id = 0
-    let types = []
-
+    // Глобальные переменные для углов поворота (в радианах)
+    let cubeRotation = 0;      // поворот каждого кубика вокруг своей оси Y
+    let pedestalRotation = 0;  // поворот пьедестала вокруг своей оси Y (локально)
+    let globalRotation = 0;    // поворот пьедестала вокруг глобальной оси Y (через центр сцены)
+    let pedestalGlobalMatrix = mat4.create();
     function main() {
+
         drawCanvas1()
         drawCanvas2()
         drawCanvas3()
+
+        mat4.translate(pedestalGlobalMatrix,pedestalGlobalMatrix, [0, 0, 5])
+
+        renderPedestal();
+        window.addEventListener("keydown", handleKeyDown);
     }
 
 
@@ -88,9 +97,9 @@
         const sidesCount = 5;
         const angel = 2 * Math.PI / sidesCount;
         let vertices = [];
-        for(let i = 0; i <= sidesCount; i++) {
-            let angle = i * angel + Math.PI/2;
-            vertices.push(Math.cos(angle)/3*2, Math.sin(angle)/3*2);
+        for (let i = 0; i <= sidesCount; i++) {
+            let angle = i * angel + Math.PI / 2;
+            vertices.push(Math.cos(angle) / 3 * 2, Math.sin(angle) / 3 * 2);
         }
 
         const vertexBuffer = gl.createBuffer();
@@ -112,7 +121,6 @@
     }
 
 
-
     // Исходный код вершинного шейдера
     const vsSource2 = `
       attribute vec4 aPosition;
@@ -131,6 +139,7 @@
       }
 
     `;
+
     function drawCanvas2() {
         const canvas = document.getElementById('glcanvas2');
         const gl = initWebGL(canvas);
@@ -155,44 +164,44 @@
         // Определяем вершины куба (центрирован, сторона = 1)
         const vertices = [
             // Передняя грань
-            -0.5, -0.5,  0.5,
-            0.5, -0.5,  0.5,
-            0.5,  0.5,  0.5,
-            -0.5,  0.5,  0.5,
+            -0.5, -0.5, 0.5,
+            0.5, -0.5, 0.5,
+            0.5, 0.5, 0.5,
+            -0.5, 0.5, 0.5,
             // Задняя грань
             -0.5, -0.5, -0.5,
-            -0.5,  0.5, -0.5,
-            0.5,  0.5, -0.5,
+            -0.5, 0.5, -0.5,
+            0.5, 0.5, -0.5,
             0.5, -0.5, -0.5,
             // Верхняя грань
-            -0.5,  0.5, -0.5,
-            -0.5,  0.5,  0.5,
-            0.5,  0.5,  0.5,
-            0.5,  0.5, -0.5,
+            -0.5, 0.5, -0.5,
+            -0.5, 0.5, 0.5,
+            0.5, 0.5, 0.5,
+            0.5, 0.5, -0.5,
             // Нижняя грань
             -0.5, -0.5, -0.5,
             0.5, -0.5, -0.5,
-            0.5, -0.5,  0.5,
-            -0.5, -0.5,  0.5,
+            0.5, -0.5, 0.5,
+            -0.5, -0.5, 0.5,
             // Правая грань
             0.5, -0.5, -0.5,
-            0.5,  0.5, -0.5,
-            0.5,  0.5,  0.5,
-            0.5, -0.5,  0.5,
+            0.5, 0.5, -0.5,
+            0.5, 0.5, 0.5,
+            0.5, -0.5, 0.5,
             // Левая грань
             -0.5, -0.5, -0.5,
-            -0.5, -0.5,  0.5,
-            -0.5,  0.5,  0.5,
-            -0.5,  0.5, -0.5,
+            -0.5, -0.5, 0.5,
+            -0.5, 0.5, 0.5,
+            -0.5, 0.5, -0.5,
         ];
 
         const indices = [
-            0,  1,  2,    0,  2,  3,      // передняя грань
-            4,  5,  6,    4,  6,  7,      // задняя грань
-            8,  9,  10,   8,  10, 11,     // верхняя грань
-            12, 13, 14,   12, 14, 15,     // нижняя грань
-            16, 17, 18,   16, 18, 19,     // правая грань
-            20, 21, 22,   20, 22, 23,     // левая грань
+            0, 1, 2, 0, 2, 3,      // передняя грань
+            4, 5, 6, 4, 6, 7,      // задняя грань
+            8, 9, 10, 8, 10, 11,     // верхняя грань
+            12, 13, 14, 12, 14, 15,     // нижняя грань
+            16, 17, 18, 16, 18, 19,     // правая грань
+            20, 21, 22, 20, 22, 23,     // левая грань
         ];
 
         // Создаём буфер вершин
@@ -216,8 +225,8 @@
         // Модельно-видовая матрица: смещаем и поворачиваем куб
         const modelViewMatrix = mat4.create();
         mat4.translate(modelViewMatrix, modelViewMatrix, [0.0, 0.0, -3.0]); // отодвигаем назад
-        mat4.rotate(modelViewMatrix, modelViewMatrix, 30 * Math.PI/180, [1, 0, 0]); // поворот вокруг X
-        mat4.rotate(modelViewMatrix, modelViewMatrix, 45 * Math.PI/180, [0, 1, 0]); // поворот вокруг Y
+        mat4.rotate(modelViewMatrix, modelViewMatrix, 30 * Math.PI / 180, [1, 0, 0]); // поворот вокруг X
+        mat4.rotate(modelViewMatrix, modelViewMatrix, 45 * Math.PI / 180, [0, 1, 0]); // поворот вокруг Y
 
         // Итоговая матрица MVP
         const mvpMatrix = mat4.create();
@@ -273,6 +282,7 @@
           gl_FragColor = vec4(color, 1.0);
       }
     `;
+
     function drawCanvas3() {
         const canvas = document.getElementById('glcanvas3');
         const gl = initWebGL(canvas);
@@ -295,10 +305,10 @@
         // Позиции в диапазоне [-0.5, 0.5]
         const vertices = new Float32Array([
             // x,    y,      u,   v
-            -0.5, -0.5,    0.0, 0.0,
-            0.5, -0.5,    1.0, 0.0,
-            0.5,  0.5,    1.0, 1.0,
-            -0.5,  0.5,    0.0, 1.0,
+            -0.5, -0.5, 0.0, 0.0,
+            0.5, -0.5, 1.0, 0.0,
+            0.5, 0.5, 1.0, 1.0,
+            -0.5, 0.5, 0.0, 1.0,
         ]);
 
         const indices = new Uint16Array([
@@ -336,6 +346,232 @@
         gl.drawElements(gl.TRIANGLES, indices.length, gl.UNSIGNED_SHORT, 0);
     }
 
+    function handleKeyDown(event) {
+        const angleIncrement = Math.PI / 180 * 5; // 5 градусов
+        switch (event.key) {
+            case 'a':
+            case 'A':
+                cubeRotation += angleIncrement;
+                break;
+            case 'd':
+            case 'D':
+                cubeRotation -= angleIncrement;
+                break;
+            case 'w':
+            case 'W':
+                pedestalRotation += angleIncrement;
+                break;
+            case 's':
+            case 'S':
+                pedestalRotation -= angleIncrement;
+                break;
+            case 'q':
+            case 'Q':
+                globalRotation += angleIncrement;
+                break;
+            case 'e':
+            case 'E':
+                globalRotation -= angleIncrement;
+                break;
+        }
+        renderPedestal()
+    }
+
+    function renderPedestal() {
+        const canvas = document.getElementById('glcanvas4');
+        let gl = initWebGL(canvas);
+        if (!gl) {
+            alert("Ваш браузер не поддерживает WebGL.");
+            return;
+        }
+
+        gl.viewport(0, 0, canvas.width, canvas.height);
+        gl.clearColor(0, 0, 0, 1.0);
+        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+        gl.enable(gl.DEPTH_TEST);
+        gl.depthFunc(gl.LEQUAL);
+
+        const shaderProgram = initShaderProgram(gl, vsSource2, fsSource2);
+        const programInfo = {
+            program: shaderProgram,
+            attribLocations: {
+                aPosition: gl.getAttribLocation(shaderProgram, 'aPosition'),
+            },
+            uniformLocations: {
+                uMVPMatrix: gl.getUniformLocation(shaderProgram, 'uMVPMatrix'),
+                uColor: gl.getUniformLocation(shaderProgram, 'uColor'),
+            },
+        };
+
+        drawPedestal(gl, canvas, programInfo);
+    }
+
+    // Функция отрисовки пьедестала из 4 кубиков
+    function drawPedestal(gl, canvas, programInfo) {
+
+        // Создаём буферы
+        const vertexBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW);
+
+        const indexBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
+        gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(indices), gl.STATIC_DRAW);
+
+        // Матрица проекции
+        const fieldOfView = 45 * Math.PI / 180;
+        const aspect = canvas.width / canvas.height;
+        const zNear = 0.1;
+        const zFar = 100.0;
+        const projectionMatrix = mat4.create();
+        mat4.perspective(projectionMatrix, fieldOfView, aspect, zNear, zFar);
+
+        // Матрица вида (камера)
+        const viewMatrix = mat4.create();
+        mat4.translate(viewMatrix, viewMatrix, [0, 0, -6]);
+
+        //поворот всего пространства вокруг оси Y
+        const globalMatrix = mat4.create();
+        mat4.rotate(globalMatrix, globalMatrix, globalRotation, [0, 1, 0]);
+
+        //перемещаем его в произвольную позицию
+        const pedestalPos = [1, -1, -5];
+        const pedestalMatrix = mat4.create();
+        mat4.translate(pedestalMatrix, pedestalMatrix, pedestalPos);
+        mat4.rotate(pedestalMatrix, pedestalMatrix, pedestalRotation, [0, 1, 0]);
+
+        // Комбинированная матрица пьедестала
+        const pedestalGlobalMatrix = mat4.create();
+        mat4.multiply(pedestalGlobalMatrix, globalMatrix, pedestalMatrix);
+
+        const offset = 0.7;
+        const cubeOffsets = [
+            [-offset, offset, 0],
+            [-offset*3, -offset, 0],
+            [-offset, -offset, 0],
+            [offset, -offset, 0],
+        ];
+
+        // Цвета для каждого кубика
+        const cubeColors = [
+            [1.0, 0.0, 0.0, 1.0],  // красный
+            [0.0, 1.0, 0.0, 1.0],  // зелёный
+            [0.0, 0.0, 1.0, 1.0],  // синий
+            [1.0, 1.0, 0.0, 1.0],  // жёлтый
+        ];
+
+        gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
+        gl.vertexAttribPointer(programInfo.attribLocations.aPosition, 3, gl.FLOAT, false, 0, 0);
+        gl.enableVertexAttribArray(programInfo.attribLocations.aPosition);
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
+
+        // Для каждого кубика формируем итоговую матрицу и отрисовываем
+        for (let i = 0; i < 4; i++) {
+            let cubeMatrix = mat4.clone(pedestalGlobalMatrix);
+            // Смещаем кубик в пределах пьедестала
+            mat4.translate(cubeMatrix, cubeMatrix, cubeOffsets[i]);
+            // Поворот самого кубика вокруг своей оси Y
+            mat4.rotate(cubeMatrix, cubeMatrix, cubeRotation, [0, 1, 0]);
+
+            // Итоговая модельно-видовая матрица
+            let modelViewMatrix = mat4.create();
+            mat4.multiply(modelViewMatrix, viewMatrix, cubeMatrix);
+
+            // Итоговая матрица MVP
+            let mvpMatrix = mat4.create();
+            mat4.multiply(mvpMatrix, projectionMatrix, modelViewMatrix);
+
+            gl.useProgram(programInfo.program);
+            gl.uniformMatrix4fv(programInfo.uniformLocations.uMVPMatrix, false, mvpMatrix);
+            gl.uniform4fv(programInfo.uniformLocations.uColor, cubeColors[i]);
+            gl.drawElements(gl.TRIANGLES, indices.length, gl.UNSIGNED_SHORT, 0);
+        }
+    }
+
+    // Функция отрисовки пьедестала из 4 кубиков
+    function drawCubes(gl, canvas, programInfo) {
+
+        // Создаём буферы
+        const vertexBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW);
+
+        const indexBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
+        gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(indices), gl.STATIC_DRAW);
+
+        // Матрица проекции
+        const fieldOfView = 45 * Math.PI / 180;
+        const aspect = canvas.width / canvas.height;
+        const zNear = 0.1;
+        const zFar = 100.0;
+        const projectionMatrix = mat4.create();
+        mat4.perspective(projectionMatrix, fieldOfView, aspect, zNear, zFar);
+
+        // Матрица вида (камера)
+        const viewMatrix = mat4.create();
+        mat4.translate(viewMatrix, viewMatrix, [0, 0, -6]);
+
+        // Глобальная трансформация: поворот всего пространства вокруг оси Y (через центр сцены)
+        const globalMatrix = mat4.create();
+        mat4.rotate(globalMatrix, globalMatrix, globalRotation, [0, 1, 0]);
+
+        // Трансформация пьедестала: перемещаем его в произвольную позицию (не в центре) и поворачиваем вокруг своего центра
+        const pedestalPos = [1.5, 0, 0]; // произвольное смещение
+        const pedestalMatrix = mat4.create();
+        mat4.translate(pedestalMatrix, pedestalMatrix, pedestalPos);
+        mat4.rotate(pedestalMatrix, pedestalMatrix, pedestalRotation, [0, 1, 0]);
+
+        // Комбинированная матрица пьедестала (глобальный и локальный поворот)
+        const pedestalGlobalMatrix = mat4.create();
+        mat4.multiply(pedestalGlobalMatrix, globalMatrix, pedestalMatrix);
+
+        // Смещения для расположения 4-х кубиков (расположим их в виде 2x2)
+        const offset = 0.7;
+        const cubeOffsets = [
+            [-offset, offset, 0],
+            [offset, offset, 0],
+            [-offset, -offset, 0],
+            [offset, -offset, 0],
+        ];
+
+        // Цвета для каждого кубика
+        const cubeColors = [
+            [1.0, 0.0, 0.0, 1.0],  // красный
+            [0.0, 1.0, 0.0, 1.0],  // зелёный
+            [0.0, 0.0, 1.0, 1.0],  // синий
+            [1.0, 1.0, 0.0, 1.0],  // жёлтый
+        ];
+
+        gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
+        gl.vertexAttribPointer(programInfo.attribLocations.aPosition, 3, gl.FLOAT, false, 0, 0);
+        gl.enableVertexAttribArray(programInfo.attribLocations.aPosition);
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
+
+        let mvpMatrix = mat4.create();
+        let modelViewMatrix = mat4.create();
+
+        // Для каждого кубика формируем итоговую матрицу и отрисовываем
+        for (let i = 0; i < 4; i++) {
+            let cubeMatrix = mat4.clone(pedestalGlobalMatrix);
+            // Смещаем кубик в пределах пьедестала
+            mat4.translate(cubeMatrix, cubeMatrix, cubeOffsets[i]);
+            // Поворот самого кубика вокруг своей оси Y
+            mat4.rotate(cubeMatrix, cubeMatrix, cubeRotation, [0, 1, 0]);
+
+            // Итоговая модельно-видовая матрица
+            mat4.multiply(modelViewMatrix, viewMatrix, cubeMatrix);
+
+            // Итоговая матрица MVP
+            mat4.multiply(mvpMatrix, projectionMatrix, modelViewMatrix);
+
+            gl.useProgram(programInfo.program);
+            gl.uniformMatrix4fv(programInfo.uniformLocations.uMVPMatrix, false, mvpMatrix);
+            gl.uniform4fv(programInfo.uniformLocations.uColor, cubeColors[i]);
+            gl.drawElements(gl.TRIANGLES, indices.length, gl.UNSIGNED_SHORT, 0);
+        }
+    }
+
 
     // Функция компиляции шейдера
     function compileShader(gl, type, source) {
@@ -367,6 +603,49 @@
         }
         return shaderProgram;
     }
+
+    // Вершины куба (размер 1, центр в (0,0,0))
+    const vertices = [
+        // Передняя грань
+        -0.5, -0.5, 0.5,
+        0.5, -0.5, 0.5,
+        0.5, 0.5, 0.5,
+        -0.5, 0.5, 0.5,
+        // Задняя грань
+        -0.5, -0.5, -0.5,
+        -0.5, 0.5, -0.5,
+        0.5, 0.5, -0.5,
+        0.5, -0.5, -0.5,
+        // Верхняя грань
+        -0.5, 0.5, -0.5,
+        -0.5, 0.5, 0.5,
+        0.5, 0.5, 0.5,
+        0.5, 0.5, -0.5,
+        // Нижняя грань
+        -0.5, -0.5, -0.5,
+        0.5, -0.5, -0.5,
+        0.5, -0.5, 0.5,
+        -0.5, -0.5, 0.5,
+        // Правая грань
+        0.5, -0.5, -0.5,
+        0.5, 0.5, -0.5,
+        0.5, 0.5, 0.5,
+        0.5, -0.5, 0.5,
+        // Левая грань
+        -0.5, -0.5, -0.5,
+        -0.5, -0.5, 0.5,
+        -0.5, 0.5, 0.5,
+        -0.5, 0.5, -0.5,
+    ];
+
+    const indices = [
+        0, 1, 2, 0, 2, 3,      // передняя грань
+        4, 5, 6, 4, 6, 7,      // задняя грань
+        8, 9, 10, 8, 10, 11,      // верхняя грань
+        12, 13, 14, 12, 14, 15,      // нижняя грань
+        16, 17, 18, 16, 18, 19,      // правая грань
+        20, 21, 22, 20, 22, 23,      // левая грань
+    ];
 
 
 </script>
