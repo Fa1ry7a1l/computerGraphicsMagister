@@ -87,8 +87,8 @@
     const gouraudVS = `
   attribute vec4 aPosition;
   attribute vec3 aNormal;
-  uniform mat4 uMVPMatrix;
-  uniform mat4 uModelMatrix;
+  uniform mat4 uMVPMatrix; --
+  uniform mat4 uModelMatrix; --
   uniform mat4 uNormalMatrix;
 
   // Параметры света
@@ -96,7 +96,7 @@
   uniform float uAmbientIntensity;
   uniform float uLinearAttenuation;
   uniform float uQuadraticAttenuation;
-  uniform int uLightingModel; // 0: Ламберта, 1: Фонга (с specular)
+  uniform int uLightingModel; // 0: Ламберта, 1: Фонга (с specular) --
   uniform float uShininess;
   uniform vec3 uViewPos;
   uniform vec3 uDiffuseColor;
@@ -132,6 +132,55 @@
       gl_FragColor = vColor;
   }
 `;
+
+    var vShaderGurou = 'precision highp float;'+
+        'attribute vec3 aPosition;'
+        'attribute vec3 aVertexColor;' +
+        'attribute vec3 aNormal;'
+
+        'uniform mat4 uMVMatrix;' +
+        'uniform mat4 uPMatrix;' +
+        'uniform mat3 uNormalMatrix;' 
+
+        'uniform vec3 uLightPos;' 
+        'uniform vec3 uLightColor;' +
+        'uniform float uLinearAttenuation;'
+        'uniform float uQuadraticAttenuation;'
+        'uniform vec3 uAmbientIntensity;'
+        'uniform float uShininess;'
+        'varying vec3 vColor;' +
+        'varying highp vec3 vPosition;' +
+        'varying highp vec3 vNormal;' +
+        'varying vec3 vLightIntensity;' + // Добавляем переменную для интенсивности освещения
+
+        'void main(void) {' +
+        ' vec4 camPos = uMVMatrix * vec4(aPosition, 1.0) ;' +
+        ' vPosition = camPos.xyz/ camPos.w ;' +
+        ' vNormal = aNormal;' +
+        ' vec3 lightDirection = normalize(uLightPos - vPosition);' +
+        ' vec3 viewDirection = normalize(vPosition.xyz);' +
+        ' vec3 normal = normalize(uNormalMatrix * aNormal);' +
+        ' float diffuse = max(0.0, dot(normal, lightDirection));' +
+        ' vec3 reflectDir = reflect(-lightDirection, normal);'+
+        ' float spec = pow(max(dot(reflectDir, viewDirection), 0.0), uShininess);'+
+        ' vec3 specular = vec3(spec, spec, spec);'+
+        ' float distance = length(uLightPos - camPos.xyz);' +
+        ' float attenuation = 1.0 / (1.0 + uLinearAttenuation * distance + uQuadraticAttenuation * distance * distance);' +
+        ' vLightIntensity = uAmbientIntensity + diffuse * attenuation + specular * attenuation;' +
+        ' vColor = aVertexColor;' +
+        ' gl_Position = uPMatrix * camPos;' +
+        '}';
+
+
+
+    var fShaderGurou = ' precision highp float; '+
+
+        'varying vec3 vColor;' +
+        'varying vec3 vLightIntensity;' +
+        'void main(void) {' +
+
+        'gl_FragColor = vec4(vLightIntensity.rgb * vColor, 1.0);' +
+        '}';
 
     // --- Phong шейдинг (освещение вычисляется в фрагментном шейдере) ---
     const phongVS = `
