@@ -1,0 +1,343 @@
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OBJ and MTL Loader in WebGL</title>
+    <script type="importmap">
+        {
+          "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.149.0/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.149.0/examples/jsm/"
+          }
+        }
+    </script>
+</head>
+
+<body>
+<script type="module">
+    import * as THREE from 'three';
+    import {OBJLoader} from 'three/addons/loaders/OBJLoader.js';
+    import {MTLLoader} from 'three/addons/loaders/MTLLoader.js';
+
+
+    THREE.Cache.enabled = true;
+
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+    const renderer = new THREE.WebGLRenderer();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.body.appendChild(renderer.domElement);
+
+    const ambientLight = new THREE.AmbientLight(0xffffff, 1);
+    scene.add(ambientLight);
+
+    const geometry = new THREE.BoxGeometry(1000, 0.1, 1000);
+    const material = new THREE.MeshStandardMaterial({color: 0x808080});
+    const platform = new THREE.Mesh(geometry, material);
+    scene.add(platform);
+
+    const mtlLoader = new MTLLoader()
+    let carObject, human;
+    let carObjectBox, humanBox;
+    let droneModel;
+    let treeModel;
+    let pointLights = [];
+    let proj = [];
+    let colliders = []
+
+    mtlLoader.load('BaseHuman.mtl', (mtl) => {
+        const loader = new OBJLoader();
+        mtl.preload();
+        loader.setMaterials(mtl)
+        loader.load(
+            'BaseHuman.obj',
+            function (object) {
+                human = object;
+                scene.add(human);
+                object.scale.set(2, 2, 2);
+
+                human.position.x += 10;
+                human.position.y += 0.1;
+
+                humanBox = new THREE.Box3(new THREE.Vector3(), new THREE.Vector3());
+                humanBox.setFromObject(object);
+            },
+            function (xhr) {
+                // console.log((xhr.loaded / xhr.total * 100) + '% loaded');
+            },
+            function (error) {
+                // console.log('An error happened');
+            }
+        );
+    });
+
+    mtlLoader.load('Car.mtl', (mtl) => {
+        const loader = new OBJLoader();
+        mtl.preload();
+        loader.setMaterials(mtl)
+        loader.load(
+            'Car.obj',
+            function (object) {
+                carObject = object;
+                scene.add(carObject);
+
+                const headlight1 = new THREE.SpotLight(0xffffff, 1, 40, Math.PI / 12, 0.2, 1);
+                headlight1.position.set(-0.7, 1, 0.3);
+                headlight1.target.position.set(-0.7, 0.2, 5);
+
+                const headlight2 = new THREE.SpotLight(0xffffff, 1, 40, Math.PI / 12, 0.2, 1);
+                headlight2.position.set(0.7, 1, 0.3);
+                headlight2.target.position.set(0.7, 0.2, 5);
+
+                proj.push(headlight1);
+                proj.push(headlight2);
+
+                carObject.add(headlight1);
+                carObject.add(headlight2);
+                carObject.add(headlight1.target);
+                carObject.add(headlight2.target);
+
+                carObject.position.x += 20;
+                carObject.position.y += 0.1;
+
+                carObjectBox = new THREE.Box3(new THREE.Vector3(), new THREE.Vector3());
+                carObjectBox.setFromObject(object);
+            },
+            function (xhr) {
+                // console.log((xhr.loaded / xhr.total * 100) + '% loaded');
+            },
+            function (error) {
+                // console.log('An error happened');
+            }
+        );
+    });
+
+    mtlLoader.load('Tree low.mtl', (mtl) => {
+        const loader = new OBJLoader();
+        mtl.preload();
+        loader.setMaterials(mtl);
+        loader.load(
+            'Tree low.obj',
+            function (object) {
+                // Применяем масштабирование сразу после загрузки
+                object.scale.set(0.05, 0.05, 0.05);
+                treeModel = object;
+
+                mtlLoader.load('Drone.mtl', (mtl) => {
+                    const loader = new OBJLoader();
+                    mtl.preload();
+                    loader.setMaterials(mtl);
+                    loader.load(
+                        'Drone.obj',
+                        function (object) {
+                            object.scale.set(2, 2, 2);
+
+                            droneModel = object;
+                            instanceDrones()
+                        },
+                        function (xhr) {
+                        },
+                        function (error) {
+                        }
+                    );
+                });
+            },
+            function (xhr) {
+                // Прогресс загрузки, если необходимо
+            },
+            function (error) {
+                console.error('Ошибка загрузки модели дерева:', error);
+            }
+        );
+    });
+
+    function tree(x, z) {
+        if (!treeModel) {
+            console.error("Модель дерева еще не загружена!");
+            return;
+        }
+
+
+        // Создаем глубокую копию модели дерева
+        const clone = treeModel.clone(true);
+        clone.position.set(x, 0, z);
+        scene.add(clone);
+    }
+
+    mtlLoader.load('cottage_obj.mtl', (mtl) => {
+        const loader = new OBJLoader();
+        mtl.preload();
+        loader.setMaterials(mtl)
+        loader.load(
+            'cottage_obj.obj',
+            function (object) {
+                scene.add(object);
+
+                const textureLoader = new THREE.TextureLoader();
+                const texture1 = textureLoader.load('cottage_diffuse.png');
+
+                object.traverse(function (child) {
+                    if (child.isMesh) {
+                        if (child.name === 'Cube_Cube.002') {
+                            child.material = new THREE.MeshStandardMaterial({map: texture1});
+                        }
+                    }
+                });
+
+                object.rotateY(Math.PI)
+                object.position.set(0, 0, -50);
+
+                let box = new THREE.Box3(new THREE.Vector3(), new THREE.Vector3());
+                box.setFromObject(object);
+                colliders.push(box)
+            },
+            function (xhr) {
+            },
+            function (error) {
+            }
+        );
+    });
+
+
+    function instanceDrones() {
+        let minX = -100, maxX = 100;
+        let minZ = -100, maxZ = 100;
+        let count = 50;
+
+        lamp(25, 25, true);
+        lamp(25, -25, true);
+        lamp(-25, 25, true);
+        lamp(-25, -25, true);
+        for (let i = 0; i < count; i++) {
+            const x = getRandomInRange(minX, maxX);
+            const z = getRandomInRange(minZ, maxZ);
+            lamp(x, z, (Math.random() < 0.5))
+            tree(x, z)
+        }
+    }
+
+    function lamp(x, z, isLight) {
+        if (!droneModel) {
+            console.error("Модель еще не загружена!");
+            return;
+        }
+
+        // Клонируем модель (глубокое клонирование, если необходимо)
+        const objectInstance = droneModel.clone(true);
+        scene.add(objectInstance);
+
+        // Создаем источник света и прикрепляем к экземпляру
+        if (isLight) {
+            const pointLight = new THREE.PointLight(0xffffff, 1, 50);
+            pointLight.position.set(-1, 10, 1);
+            objectInstance.add(pointLight);
+            pointLights.push(pointLight);
+
+        }
+
+        // Задаем позицию экземпляра
+        objectInstance.position.set(x, 10, z);
+
+    }
+
+
+    function getRandomInRange(min, max) {
+        return Math.floor(Math.random() * (max - min + 1)) + min;
+    }
+
+    let count = 1;
+    tree(30, 100, 0, 100, count);
+    tree(-30, -100, 0, 100, count);
+    tree(30, 100, 0, -100, count);
+    tree(-30, -100, 0, -100, count);
+
+    tree(0, 100, 30, 100, count);
+    tree(0, -100, 30, 100, count);
+    tree(0, 100, -30, -100, count);
+    tree(0, -100, -30, -100, count);
+
+
+    camera.position.set(30, 30, 30);
+    camera.lookAt(0, 0, 0);
+
+    const speed = 0.015;
+    let angle = 0;
+    const radius = 20;
+
+    const keys = {
+        w: false,
+        s: false,
+        a: false,
+        d: false
+    };
+
+    document.addEventListener('keydown', (event) => {
+        if (event.key in keys) keys[event.key] = true;
+    });
+
+    document.addEventListener('keyup', (event) => {
+        if (event.key in keys) keys[event.key] = false;
+    });
+
+    document.addEventListener('keydown', (event) => {
+        if (event.key === '1') {
+            ambientLight.visible = !ambientLight.visible;
+        }
+        if (event.key === '2') {
+            pointLights.forEach(light => light.visible = !light.visible);
+        }
+        if (event.key === '3') {
+            proj.forEach(light => light.visible = !light.visible);
+        }
+    });
+
+
+    function animate() {
+        requestAnimationFrame(animate);
+        if (carObject) {
+            let newCarObject = carObject.clone()
+            newCarObject.position.x = radius * Math.cos(angle + speed);
+            newCarObject.position.z = radius * Math.sin(angle + speed);
+            newCarObject.rotation.y -= speed;
+
+            let newBox = carObjectBox.clone()
+            newBox.setFromObject(newCarObject)
+
+            if (!newBox.intersectsBox(humanBox) && colliders.every(col => !newBox.intersectsBox(col))) {
+                angle += speed;
+                carObject.position.x = radius * Math.cos(angle);
+                carObject.position.z = radius * Math.sin(angle);
+                carObject.rotation.y -= speed;
+
+                carObjectBox = newBox
+            }
+        }
+
+        if (human) {
+            let newHuman = human.clone()
+            if (keys.w) newHuman.position.z -= speed * 10;
+            if (keys.s) newHuman.position.z += speed * 10;
+            if (keys.a) newHuman.position.x -= speed * 10;
+            if (keys.d) newHuman.position.x += speed * 10;
+
+            let newBox = humanBox.clone()
+            newBox.setFromObject(newHuman)
+
+            if (!newBox.intersectsBox(carObjectBox) && colliders.every(col => !newBox.intersectsBox(col))) {
+                if (keys.w) human.position.z -= speed * 10;
+                if (keys.s) human.position.z += speed * 10;
+                if (keys.a) human.position.x -= speed * 10;
+                if (keys.d) human.position.x += speed * 10;
+                humanBox = newBox
+            }
+        }
+
+        renderer.render(scene, camera);
+    }
+
+    animate();
+</script>
+</body>
+
+</html>
