@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
     <meta charset="utf-8">
-    <title>Система частиц на WebGL с текстурой и прозрачностью</title>
+    <title>Система частиц на WebGL с разными текстурами, линиями и смайликами</title>
     <style>
         body {
             margin: 0;
@@ -29,14 +29,58 @@
         <option value="fire">Бенгальский огонь</option>
         <option value="smoke">Дым</option>
         <option value="rain">Дождь</option>
-        <option value="cloud">Облака / струи пара</option>
+        <option value="cloud">Струя пара</option>
         <option value="firework">Фейерверк</option>
+        <option value="smiley">Смайлик</option>
     </select>
 </div>
 <canvas id="glcanvas"></canvas>
 
-<!-- Вершинный шейдер -->
+<!-- Вершинный шейдер для частиц (точки) -->
 <script id="vertex-shader" type="x-shader/x-vertex">
+    attribute vec3 a_position;
+    attribute vec4 a_color;
+    attribute float a_angle;  // атрибут для поворота (используется для смайлика)
+    uniform mat4 u_projection;
+    uniform mat4 u_modelView;
+    varying vec4 v_color;
+    varying float v_angle;    // передаём угол в фрагментный шейдер
+    void main(void) {
+      gl_Position = u_projection * u_modelView * vec4(a_position, 1.0);
+      gl_PointSize = 32.0;
+      v_color = a_color;
+      v_angle = a_angle;
+    }
+</script>
+
+<!-- Фрагментный шейдер для частиц (точки) с текстурой и поворотом -->
+<script id="fragment-shader" type="x-shader/x-fragment">
+    precision mediump float;
+    varying vec4 v_color;
+    varying float v_angle;  // полученный угол поворота
+    uniform sampler2D u_texture;
+    void main(void) {
+      // Центрируем координаты точки
+      vec2 centered = gl_PointCoord - vec2(0.5);
+      float dist = length(centered);
+      vec2 texCoord;
+      // Если фрагмент внутри вписанной окружности, применяем поворот
+      if(dist < 0.5) {
+        float cosA = cos(v_angle);
+        float sinA = sin(v_angle);
+        vec2 rotated = vec2(centered.x * cosA - centered.y * sinA,
+                            centered.x * sinA + centered.y * cosA);
+        texCoord = rotated + vec2(0.5);
+      } else {
+        texCoord = gl_PointCoord;
+      }
+      vec4 texColor = texture2D(u_texture, texCoord);
+      gl_FragColor = texColor * v_color;
+    }
+</script>
+
+<!-- Вершинный шейдер для линий -->
+<script id="vertex-shader-line" type="x-shader/x-vertex">
     attribute vec3 a_position;
     attribute vec4 a_color;
     uniform mat4 u_projection;
@@ -44,34 +88,43 @@
     varying vec4 v_color;
     void main(void) {
       gl_Position = u_projection * u_modelView * vec4(a_position, 1.0);
-      // Размер точки задаём равным 32 пикселям
-      gl_PointSize = 32.0;
       v_color = a_color;
     }
 </script>
 
-<!-- Фрагментный шейдер с текстурой -->
-<script id="fragment-shader" type="x-shader/x-fragment">
+<!-- Фрагментный шейдер для линий -->
+<script id="fragment-shader-line" type="x-shader/x-fragment">
     precision mediump float;
     varying vec4 v_color;
-    uniform sampler2D u_texture;
     void main(void) {
-      // Используем координаты точки для выборки текстуры
-      vec4 texColor = texture2D(u_texture, gl_PointCoord);
-      // Итоговый цвет: произведение цвета вершины и текстурного цвета
-      gl_FragColor = texColor * v_color;
+      gl_FragColor = v_color;
     }
 </script>
 
 <script>
-    // Глобальные переменные
-    let canvas, gl, program;
+    // ----- Глобальные переменные -----
+    let canvas, gl;
+    let pointProgram, lineProgram;
     let texture;
     let particles = [];
     let lastTime = 0;
     let effect = "fire"; // эффект по умолчанию
 
-    // Функции для создания матриц (ортографическая проекция)
+    // Соответствие эффекта и файла с текстурой
+    const textureSources = {
+        fire: "explosion.png",
+        smoke: "gradient.png",
+        rain: "gradient.png",
+        cloud: "gradient.png",
+        firework: "flame.png",
+        smiley: "smilie.png"
+    };
+
+    let projectionMatrix, modelViewMatrix;
+    let positionBuffer, colorBuffer, angleBuffer;
+    let linePositionBuffer, lineColorBuffer;
+
+    // ---------- Матрицы ----------
     function identityMatrix() {
         return [1, 0, 0, 0,
             0, 1, 0, 0,
@@ -83,24 +136,71 @@
         let tb = top - bottom;
         let fn = far - near;
         return [
-            2/rl, 0, 0, 0,
-            0, 2/tb, 0, 0,
-            0, 0, -2/fn, 0,
-            -(left+right)/rl, -(top+bottom)/tb, -(far+near)/fn, 1
+            2 / rl, 0, 0, 0,
+            0, 2 / tb, 0, 0,
+            0, 0, -2 / fn, 0,
+            -(left + right) / rl,
+            -(top + bottom) / tb,
+            -(far + near) / fn,
+            1
         ];
     }
 
-    // Инициализация шейдеров
-    function getShader(gl, id) {
-        let shaderScript = document.getElementById(id);
-        if (!shaderScript) return null;
-        let source = shaderScript.text;
+    // ----- Шейдеры для частиц (точки) -----
+    function initPointShaders() {
+        const vsSource = document.getElementById("vertex-shader");
+        const fsSource = document.getElementById("fragment-shader");
+        let vs = createShader(gl, vsSource);
+        let fs = createShader(gl, fsSource);
+        pointProgram = gl.createProgram();
+        gl.attachShader(pointProgram, vs);
+        gl.attachShader(pointProgram, fs);
+        gl.linkProgram(pointProgram);
+        if (!gl.getProgramParameter(pointProgram, gl.LINK_STATUS)) {
+            alert("Не удалось инициализировать шейдеры для точек");
+        }
+        pointProgram.a_position = gl.getAttribLocation(pointProgram, "a_position");
+        gl.enableVertexAttribArray(pointProgram.a_position);
+        pointProgram.a_color = gl.getAttribLocation(pointProgram, "a_color");
+        gl.enableVertexAttribArray(pointProgram.a_color);
+        pointProgram.a_angle = gl.getAttribLocation(pointProgram, "a_angle");
+        gl.enableVertexAttribArray(pointProgram.a_angle);
+        pointProgram.u_projection = gl.getUniformLocation(pointProgram, "u_projection");
+        pointProgram.u_modelView = gl.getUniformLocation(pointProgram, "u_modelView");
+        pointProgram.u_texture = gl.getUniformLocation(pointProgram, "u_texture");
+    }
+
+    // ----- Шейдеры для линий -----
+    function initLineShaders() {
+        const vsSource = document.getElementById("vertex-shader-line");
+        const fsSource = document.getElementById("fragment-shader-line");
+        let vs = createShader(gl, vsSource);
+        let fs = createShader(gl, fsSource);
+        lineProgram = gl.createProgram();
+        gl.attachShader(lineProgram, vs);
+        gl.attachShader(lineProgram, fs);
+        gl.linkProgram(lineProgram);
+        if (!gl.getProgramParameter(lineProgram, gl.LINK_STATUS)) {
+            alert("Не удалось инициализировать шейдеры для линий");
+        }
+        lineProgram.a_position = gl.getAttribLocation(lineProgram, "a_position");
+        gl.enableVertexAttribArray(lineProgram.a_position);
+        lineProgram.a_color = gl.getAttribLocation(lineProgram, "a_color");
+        gl.enableVertexAttribArray(lineProgram.a_color);
+        lineProgram.u_projection = gl.getUniformLocation(lineProgram, "u_projection");
+        lineProgram.u_modelView = gl.getUniformLocation(lineProgram, "u_modelView");
+    }
+
+    // ----- Функция компиляции шейдера -----
+    function createShader(gl, scriptTag) {
+        if (!scriptTag) return null;
+        let source = scriptTag.text;
         let shader;
-        if (shaderScript.type === "x-shader/x-fragment") {
+        if (scriptTag.type === "x-shader/x-fragment") {
             shader = gl.createShader(gl.FRAGMENT_SHADER);
-        } else if (shaderScript.type === "x-shader/x-vertex") {
+        } else {
             shader = gl.createShader(gl.VERTEX_SHADER);
-        } else return null;
+        }
         gl.shaderSource(shader, source);
         gl.compileShader(shader);
         if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
@@ -109,60 +209,45 @@
         }
         return shader;
     }
-    function initShaders() {
-        let vertexShader = getShader(gl, "vertex-shader");
-        let fragmentShader = getShader(gl, "fragment-shader");
-        program = gl.createProgram();
-        gl.attachShader(program, vertexShader);
-        gl.attachShader(program, fragmentShader);
-        gl.linkProgram(program);
-        if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-            alert("Не удалось инициализировать шейдеры");
-        }
-        gl.useProgram(program);
-        program.a_position = gl.getAttribLocation(program, "a_position");
-        gl.enableVertexAttribArray(program.a_position);
-        program.a_color = gl.getAttribLocation(program, "a_color");
-        gl.enableVertexAttribArray(program.a_color);
-        program.u_projection = gl.getUniformLocation(program, "u_projection");
-        program.u_modelView = gl.getUniformLocation(program, "u_modelView");
-        program.u_texture = gl.getUniformLocation(program, "u_texture");
-    }
 
-    // Загрузка текстуры (файл spark.png должен быть рядом с index.html)
-    function initTexture(callback) {
+    // ----- Загрузка текстуры -----
+    function initTexture(effectType, callback) {
         texture = gl.createTexture();
         let image = new Image();
-        image.src = "flame.png";
-        image.onload = function() {
+        image.src = textureSources[effectType] || "flame.png";
+        image.onload = function () {
             gl.bindTexture(gl.TEXTURE_2D, texture);
             gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
             gl.generateMipmap(gl.TEXTURE_2D);
             gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
             gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
             gl.bindTexture(gl.TEXTURE_2D, null);
-            if(callback) callback();
+            if (callback) callback();
         }
     }
 
-    // Класс частицы
+    // ----- Класс частицы -----
     function Particle(x, y, vx, vy, life, color, effectType) {
         this.x = x;
         this.y = y;
         this.vx = vx;
         this.vy = vy;
-        this.life = life; // время жизни в мс
+        this.life = life;
         this.age = 0;
         this.color = color.slice();
         this.effectType = effectType;
-        this.exploded = false; // для фейерверка
+        this.exploded = false; // для firework: false - ракета, true - частица взрыва
+        this.originX = 0;
+        this.originY = 0;
+        this.angle = 0; // для эффекта "smiley"
     }
-    Particle.prototype.update = function(delta) {
+
+    Particle.prototype.update = function (delta) {
         this.age += delta;
         this.x += this.vx * delta;
         this.y += this.vy * delta;
         let t = this.age / this.life;
-        switch(this.effectType) {
+        switch (this.effectType) {
             case "fire":
                 this.color[3] = 1.0 - t;
                 this.color[1] = 1.0 - t * 0.5;
@@ -174,9 +259,17 @@
                 this.color = [0.5, 0.5, 1.0, 1.0];
                 break;
             case "cloud":
-                this.color[3] = 1.0 - t * 0.3;
+                // Линейное затухание альфа
+                this.color[3] = 1.0 - t;
                 break;
             case "firework":
+                this.color[3] = 1.0 - t;
+                break;
+            case "smiley":
+                let dx = this.x - this.originX;
+                let dy = this.y - this.originY;
+                let dist = Math.sqrt(dx * dx + dy * dy);
+                this.angle = dist * 10.0;
                 this.color[3] = 1.0 - t;
                 break;
         }
@@ -185,107 +278,145 @@
         }
     };
 
-    // Функция переинициализации частицы в зависимости от эффекта
+    // ----- Переинициализация частицы -----
     function resetParticle(p) {
         p.age = 0;
-        switch(p.effectType) {
+        switch (p.effectType) {
             case "fire":
-                p.x = 0; p.y = 0;
-                let angle = (Math.random() - 0.5) * (Math.PI/6) + Math.PI/2;
-                let speed = 0.0005 + Math.random() * 0.0005;
+                p.x = 0;
+                p.y = 0;
+            {
+                let angle = Math.random() * 2.0 * Math.PI;
+                let speed = 0.0002 + Math.random() * 0.0002;
                 p.vx = Math.cos(angle) * speed;
                 p.vy = Math.sin(angle) * speed;
+            }
                 p.life = 1000 + Math.random() * 500;
                 p.color = [1, 1, 1, 1];
                 break;
             case "smoke":
-                p.x = (Math.random()-0.5)*0.1;
+                p.x = (Math.random() - 0.5) * 0.1;
                 p.y = 0;
-                p.vx = (Math.random()-0.5)*0.0001;
-                p.vy = 0.0001 + Math.random()*0.0001;
-                p.life = 3000 + Math.random()*1000;
+                p.vx = (Math.random() - 0.5) * 0.0001;
+                p.vy = 0.0001 + Math.random() * 0.0001;
+                p.life = 3000 + Math.random() * 1000;
                 p.color = [0.8, 0.8, 0.8, 1];
                 break;
             case "rain":
-                p.x = Math.random()*2 - 1;
-                p.y = 1;
+                p.x = Math.random() * 2 - 1;
+                p.y = 1; // всегда начинаем с верха
                 p.vx = 0;
-                p.vy = -0.001 - Math.random()*0.001;
+                p.vy = -0.001 - Math.random() * 0.001;
                 p.life = 2000;
                 p.color = [0.5, 0.5, 1, 1];
                 break;
             case "cloud":
-                p.x = (Math.random()-0.5)*1.5;
-                p.y = (Math.random()-0.5)*0.3;
-                p.vx = (Math.random()-0.5)*0.0002;
-                p.vy = (Math.random()-0.5)*0.0002;
-                p.life = 5000 + Math.random()*2000;
+                // Эмитируются из центра экрана, направленные почти строго вверх.
+                p.x = 0;
+                p.y = 0;
+                // Угол выбирается случайно от 1.45 до 1.70 радиан (~83°–97°)
+                let lower = 1.45;
+                let upper = 1.70;
+                let angle = Math.random() * (upper - lower) + lower;
+                let speed = 0.00015 + Math.random() * 0.00005;
+                p.vx = Math.cos(angle) * speed;
+                p.vy = Math.sin(angle) * speed;
+                p.life = 5000 + Math.random() * 2000;
                 p.color = [1, 1, 1, 1];
+                // Задаём случайный начальный возраст для непрерывности
+                p.age = Math.random() * p.life;
                 break;
             case "firework":
                 if (!p.exploded) {
                     p.x = 0;
                     p.y = -1;
                     p.vx = 0;
-                    p.vy = 0.001 + Math.random()*0.0005;
+                    p.vy = 0.001 + Math.random() * 0.0005;
                     p.life = 2000;
                     p.color = [1, 1, 1, 1];
                 } else {
-                    let angle = Math.random()*2*Math.PI;
-                    let speed = 0.0005 + Math.random()*0.0005;
+                    p.x = p.originX;
+                    p.y = p.originY;
+                    let angle = Math.random() * 2 * Math.PI;
+                    let speed = 0.0002 + Math.random() * 0.0002;
                     p.vx = Math.cos(angle) * speed;
                     p.vy = Math.sin(angle) * speed;
-                    p.life = 1500 + Math.random()*500;
+                    p.life = 500 + Math.random() * 1500;
                     p.color = [Math.random(), Math.random(), Math.random(), 1];
                 }
+                break;
+            case "smiley":
+                p.x = 0;
+                p.y = 0;
+                p.originX = 0;
+                p.originY = 0;
+            {
+                let angle = Math.random() * 2.0 * Math.PI;
+                let speed = 0.0002 + Math.random() * 0.0002;
+                p.vx = Math.cos(angle) * speed;
+                p.vy = Math.sin(angle) * speed;
+            }
+                p.life = 1500 + Math.random() * 500;
+                p.angle = 0;
+                p.color = [1, 1, 1, 1];
                 break;
         }
     }
 
-    // Инициализация частиц для выбранного эффекта
+    // ----- Создание набора частиц -----
     function initParticles(effectType) {
         particles = [];
-        if (effectType === "fire" || effectType === "smoke" ||
-            effectType === "rain" || effectType === "cloud") {
+        if (effectType === "fire") {
+            for (let i = 0; i < 50; i++) {
+                let p = new Particle(0, 0, 0, 0, 0, [1, 1, 1, 1], effectType);
+                resetParticle(p);
+                particles.push(p);
+            }
+        } else if (effectType === "smoke") {
             for (let i = 0; i < 300; i++) {
-                let p;
-                switch(effectType) {
-                    case "fire":
-                        p = new Particle(0, 0, 0, 0, 0, [1,1,1,1], "fire");
-                        break;
-                    case "smoke":
-                        p = new Particle(0, 0, 0, 0, 0, [0.8,0.8,0.8,1], "smoke");
-                        break;
-                    case "rain":
-                        p = new Particle(0, 0, 0, 0, 0, [0.5,0.5,1,1], "rain");
-                        break;
-                    case "cloud":
-                        p = new Particle(0, 0, 0, 0, 0, [1,1,1,1], "cloud");
-                        break;
-                }
+                let p = new Particle(0, 0, 0, 0, 0, [1, 1, 1, 1], effectType);
+                resetParticle(p);
+                particles.push(p);
+            }
+        } else if (effectType === "rain") {
+            for (let i = 0; i < 500; i++) {
+                let p = new Particle(0, 0, 0, 0, 0, [1, 1, 1, 1], effectType);
+                resetParticle(p);
+                particles.push(p);
+            }
+        } else if (effectType === "cloud") {
+            for (let i = 0; i < 1000; i++) {
+                let p = new Particle(0, 0, 0, 0, 0, [1, 1, 1, 1], effectType);
                 resetParticle(p);
                 particles.push(p);
             }
         } else if (effectType === "firework") {
-            // Для фейерверка создаём ракету
-            let rocket = new Particle(0, -1, 0, 0, 2000, [1,1,1,1], "firework");
+            let rocket = new Particle(0, -1, 0, 0, 2000, [1, 1, 1, 1], "firework");
             rocket.exploded = false;
             resetParticle(rocket);
             particles.push(rocket);
+        } else if (effectType === "smiley") {
+            for (let i = 0; i < 200; i++) {
+                let p = new Particle(0, 0, 0, 0, 0, [1, 1, 1, 1], effectType);
+                resetParticle(p);
+                particles.push(p);
+            }
         }
     }
 
-    // При взрыве фейерверка создаём множество частиц
+    // ----- Логика взрыва фейерверка -----
     function spawnFireworkExplosion(x, y) {
-        for (let i = 0; i < 100; i++) {
-            let p = new Particle(x, y, 0, 0, 0, [1,1,1,1], "firework");
+        for (let i = 0; i < 30; i++) {
+            let p = new Particle(x, y, 0, 0, 0, [1, 1, 1, 1], "firework");
             p.exploded = true;
+            p.originX = x;
+            p.originY = y;
             resetParticle(p);
             particles.push(p);
         }
     }
 
-    // Обновление состояния всех частиц
+    // ----- Обновление частиц -----
     function updateParticles(delta) {
         for (let i = 0; i < particles.length; i++) {
             let p = particles[i];
@@ -298,40 +429,77 @@
                 continue;
             }
             p.update(delta);
+            // Для дождя: если частица ушла ниже нижней границы, сбрасываем её
+            if (p.effectType === "rain" && p.y < -1) {
+                resetParticle(p);
+            }
         }
     }
 
-    // Буферы для передачи координат и цветов частиц
-    let positionBuffer, colorBuffer;
-    function drawScene() {
-        gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
-        gl.clearColor(0, 0, 0, 1);
-        gl.clear(gl.COLOR_BUFFER_BIT);
-
+    // ----- Отрисовка точечных частиц -----
+    function drawPoints() {
+        gl.useProgram(pointProgram);
         let positions = [];
         let colors = [];
+        let angles = [];
         for (let i = 0; i < particles.length; i++) {
             let p = particles[i];
             positions.push(p.x, p.y, 0);
             colors.push(p.color[0], p.color[1], p.color[2], p.color[3]);
+            angles.push(p.effectType === "smiley" ? p.angle : 0);
         }
-
         gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
         gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(positions), gl.DYNAMIC_DRAW);
-        gl.vertexAttribPointer(program.a_position, 3, gl.FLOAT, false, 0, 0);
-
+        gl.vertexAttribPointer(pointProgram.a_position, 3, gl.FLOAT, false, 0, 0);
         gl.bindBuffer(gl.ARRAY_BUFFER, colorBuffer);
         gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(colors), gl.DYNAMIC_DRAW);
-        gl.vertexAttribPointer(program.a_color, 4, gl.FLOAT, false, 0, 0);
-
-        // Привязка текстуры для использования в шейдере
+        gl.vertexAttribPointer(pointProgram.a_color, 4, gl.FLOAT, false, 0, 0);
+        gl.bindBuffer(gl.ARRAY_BUFFER, angleBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(angles), gl.DYNAMIC_DRAW);
+        gl.vertexAttribPointer(pointProgram.a_angle, 1, gl.FLOAT, false, 0, 0);
         gl.activeTexture(gl.TEXTURE0);
         gl.bindTexture(gl.TEXTURE_2D, texture);
-        gl.uniform1i(program.u_texture, 0);
-
+        gl.uniform1i(pointProgram.u_texture, 0);
+        gl.uniformMatrix4fv(pointProgram.u_projection, false, new Float32Array(projectionMatrix));
+        gl.uniformMatrix4fv(pointProgram.u_modelView, false, new Float32Array(modelViewMatrix));
         gl.drawArrays(gl.POINTS, 0, particles.length);
     }
 
+    // ----- Отрисовка линий (только для эффекта "fire") -----
+    function drawLines() {
+        gl.useProgram(lineProgram);
+        let linePositions = [];
+        let lineColors = [];
+        for (let i = 0; i < particles.length; i++) {
+            let p = particles[i];
+            if (p.effectType === "fire") {
+                linePositions.push(0, 0, 0);
+                linePositions.push(p.x, p.y, 0);
+                lineColors.push(1, 1, 1, p.color[3]);
+                lineColors.push(0.92, 0.78, 0.53, p.color[3]);
+            }
+        }
+        gl.bindBuffer(gl.ARRAY_BUFFER, linePositionBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(linePositions), gl.DYNAMIC_DRAW);
+        gl.vertexAttribPointer(lineProgram.a_position, 3, gl.FLOAT, false, 0, 0);
+        gl.bindBuffer(gl.ARRAY_BUFFER, lineColorBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(lineColors), gl.DYNAMIC_DRAW);
+        gl.vertexAttribPointer(lineProgram.a_color, 4, gl.FLOAT, false, 0, 0);
+        gl.uniformMatrix4fv(lineProgram.u_projection, false, new Float32Array(projectionMatrix));
+        gl.uniformMatrix4fv(lineProgram.u_modelView, false, new Float32Array(modelViewMatrix));
+        gl.drawArrays(gl.LINES, 0, linePositions.length / 3);
+    }
+
+    // ----- Основная функция отрисовки -----
+    function drawScene() {
+        gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+        gl.clearColor(0, 0, 0, 1);
+        gl.clear(gl.COLOR_BUFFER_BIT);
+        drawPoints();
+        drawLines();
+    }
+
+    // ----- Цикл анимации -----
     function animate(time) {
         let delta = time - lastTime;
         lastTime = time;
@@ -340,6 +508,7 @@
         requestAnimationFrame(animate);
     }
 
+    // ----- Инициализация WebGL -----
     function init() {
         canvas = document.getElementById("glcanvas");
         canvas.width = window.innerWidth;
@@ -349,30 +518,30 @@
             alert("Ваш браузер не поддерживает WebGL");
             return;
         }
-
-        // Включаем режим смешивания для прозрачности
         gl.enable(gl.BLEND);
         gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
-
-        initShaders();
+        initPointShaders();
+        initLineShaders();
         positionBuffer = gl.createBuffer();
         colorBuffer = gl.createBuffer();
-
-        let projection = ortho(-1, 1, -1, 1, -1, 1);
-        let modelView = identityMatrix();
-        gl.uniformMatrix4fv(program.u_projection, false, new Float32Array(projection));
-        gl.uniformMatrix4fv(program.u_modelView, false, new Float32Array(modelView));
-
+        angleBuffer = gl.createBuffer();
+        linePositionBuffer = gl.createBuffer();
+        lineColorBuffer = gl.createBuffer();
+        projectionMatrix = ortho(-1, 1, -1, 1, -1, 1);
+        modelViewMatrix = identityMatrix();
         initParticles(effect);
-        // Загружаем текстуру и запускаем анимацию после её загрузки
-        initTexture(function(){
+        initTexture(effect, function () {
             requestAnimationFrame(animate);
         });
     }
 
-    document.getElementById("effectSelect").addEventListener("change", function(e) {
+    // ----- Смена эффекта -----
+    document.getElementById("effectSelect").addEventListener("change", function (e) {
         effect = e.target.value;
         initParticles(effect);
+        initTexture(effect, function () {
+            requestAnimationFrame(animate);
+        });
     });
 
     window.onload = init;
