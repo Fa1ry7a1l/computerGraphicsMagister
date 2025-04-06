@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <title>Система частиц на WebGL с текстурой и прозрачностью</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background: #000;
+        }
+        canvas {
+            display: block;
+        }
+        #controls {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: #fff;
+            z-index: 100;
+            font-family: sans-serif;
+        }
+    </style>
+</head>
+<body>
+<div id="controls">
+    <label for="effectSelect">Выберите эффект:</label>
+    <select id="effectSelect">
+        <option value="fire">Бенгальский огонь</option>
+        <option value="smoke">Дым</option>
+        <option value="rain">Дождь</option>
+        <option value="cloud">Облака / струи пара</option>
+        <option value="firework">Фейерверк</option>
+    </select>
+</div>
+<canvas id="glcanvas"></canvas>
+
+<!-- Вершинный шейдер -->
+<script id="vertex-shader" type="x-shader/x-vertex">
+    attribute vec3 a_position;
+    attribute vec4 a_color;
+    uniform mat4 u_projection;
+    uniform mat4 u_modelView;
+    varying vec4 v_color;
+    void main(void) {
+      gl_Position = u_projection * u_modelView * vec4(a_position, 1.0);
+      // Размер точки задаём равным 32 пикселям
+      gl_PointSize = 32.0;
+      v_color = a_color;
+    }
+</script>
+
+<!-- Фрагментный шейдер с текстурой -->
+<script id="fragment-shader" type="x-shader/x-fragment">
+    precision mediump float;
+    varying vec4 v_color;
+    uniform sampler2D u_texture;
+    void main(void) {
+      // Используем координаты точки для выборки текстуры
+      vec4 texColor = texture2D(u_texture, gl_PointCoord);
+      // Итоговый цвет: произведение цвета вершины и текстурного цвета
+      gl_FragColor = texColor * v_color;
+    }
+</script>
+
+<script>
+    // Глобальные переменные
+    let canvas, gl, program;
+    let texture;
+    let particles = [];
+    let lastTime = 0;
+    let effect = "fire"; // эффект по умолчанию
+
+    // Функции для создания матриц (ортографическая проекция)
+    function identityMatrix() {
+        return [1, 0, 0, 0,
+            0, 1, 0, 0,
+            0, 0, 1, 0,
+            0, 0, 0, 1];
+    }
+    function ortho(left, right, bottom, top, near, far) {
+        let rl = right - left;
+        let tb = top - bottom;
+        let fn = far - near;
+        return [
+            2/rl, 0, 0, 0,
+            0, 2/tb, 0, 0,
+            0, 0, -2/fn, 0,
+            -(left+right)/rl, -(top+bottom)/tb, -(far+near)/fn, 1
+        ];
+    }
+
+    // Инициализация шейдеров
+    function getShader(gl, id) {
+        let shaderScript = document.getElementById(id);
+        if (!shaderScript) return null;
+        let source = shaderScript.text;
+        let shader;
+        if (shaderScript.type === "x-shader/x-fragment") {
+            shader = gl.createShader(gl.FRAGMENT_SHADER);
+        } else if (shaderScript.type === "x-shader/x-vertex") {
+            shader = gl.createShader(gl.VERTEX_SHADER);
+        } else return null;
+        gl.shaderSource(shader, source);
+        gl.compileShader(shader);
+        if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+            alert("Ошибка компиляции шейдера: " + gl.getShaderInfoLog(shader));
+            return null;
+        }
+        return shader;
+    }
+    function initShaders() {
+        let vertexShader = getShader(gl, "vertex-shader");
+        let fragmentShader = getShader(gl, "fragment-shader");
+        program = gl.createProgram();
+        gl.attachShader(program, vertexShader);
+        gl.attachShader(program, fragmentShader);
+        gl.linkProgram(program);
+        if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+            alert("Не удалось инициализировать шейдеры");
+        }
+        gl.useProgram(program);
+        program.a_position = gl.getAttribLocation(program, "a_position");
+        gl.enableVertexAttribArray(program.a_position);
+        program.a_color = gl.getAttribLocation(program, "a_color");
+        gl.enableVertexAttribArray(program.a_color);
+        program.u_projection = gl.getUniformLocation(program, "u_projection");
+        program.u_modelView = gl.getUniformLocation(program, "u_modelView");
+        program.u_texture = gl.getUniformLocation(program, "u_texture");
+    }
+
+    // Загрузка текстуры (файл spark.png должен быть рядом с index.html)
+    function initTexture(callback) {
+        texture = gl.createTexture();
+        let image = new Image();
+        image.src = "flame.png";
+        image.onload = function() {
+            gl.bindTexture(gl.TEXTURE_2D, texture);
+            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
+            gl.generateMipmap(gl.TEXTURE_2D);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+            gl.bindTexture(gl.TEXTURE_2D, null);
+            if(callback) callback();
+        }
+    }
+
+    // Класс частицы
+    function Particle(x, y, vx, vy, life, color, effectType) {
+        this.x = x;
+        this.y = y;
+        this.vx = vx;
+        this.vy = vy;
+        this.life = life; // время жизни в мс
+        this.age = 0;
+        this.color = color.slice();
+        this.effectType = effectType;
+        this.exploded = false; // для фейерверка
+    }
+    Particle.prototype.update = function(delta) {
+        this.age += delta;
+        this.x += this.vx * delta;
+        this.y += this.vy * delta;
+        let t = this.age / this.life;
+        switch(this.effectType) {
+            case "fire":
+                this.color[3] = 1.0 - t;
+                this.color[1] = 1.0 - t * 0.5;
+                break;
+            case "smoke":
+                this.color[3] = 1.0 - t;
+                break;
+            case "rain":
+                this.color = [0.5, 0.5, 1.0, 1.0];
+                break;
+            case "cloud":
+                this.color[3] = 1.0 - t * 0.3;
+                break;
+            case "firework":
+                this.color[3] = 1.0 - t;
+                break;
+        }
+        if (this.age > this.life) {
+            resetParticle(this);
+        }
+    };
+
+    // Функция переинициализации частицы в зависимости от эффекта
+    function resetParticle(p) {
+        p.age = 0;
+        switch(p.effectType) {
+            case "fire":
+                p.x = 0; p.y = 0;
+                let angle = (Math.random() - 0.5) * (Math.PI/6) + Math.PI/2;
+                let speed = 0.0005 + Math.random() * 0.0005;
+                p.vx = Math.cos(angle) * speed;
+                p.vy = Math.sin(angle) * speed;
+                p.life = 1000 + Math.random() * 500;
+                p.color = [1, 1, 1, 1];
+                break;
+            case "smoke":
+                p.x = (Math.random()-0.5)*0.1;
+                p.y = 0;
+                p.vx = (Math.random()-0.5)*0.0001;
+                p.vy = 0.0001 + Math.random()*0.0001;
+                p.life = 3000 + Math.random()*1000;
+                p.color = [0.8, 0.8, 0.8, 1];
+                break;
+            case "rain":
+                p.x = Math.random()*2 - 1;
+                p.y = 1;
+                p.vx = 0;
+                p.vy = -0.001 - Math.random()*0.001;
+                p.life = 2000;
+                p.color = [0.5, 0.5, 1, 1];
+                break;
+            case "cloud":
+                p.x = (Math.random()-0.5)*1.5;
+                p.y = (Math.random()-0.5)*0.3;
+                p.vx = (Math.random()-0.5)*0.0002;
+                p.vy = (Math.random()-0.5)*0.0002;
+                p.life = 5000 + Math.random()*2000;
+                p.color = [1, 1, 1, 1];
+                break;
+            case "firework":
+                if (!p.exploded) {
+                    p.x = 0;
+                    p.y = -1;
+                    p.vx = 0;
+                    p.vy = 0.001 + Math.random()*0.0005;
+                    p.life = 2000;
+                    p.color = [1, 1, 1, 1];
+                } else {
+                    let angle = Math.random()*2*Math.PI;
+                    let speed = 0.0005 + Math.random()*0.0005;
+                    p.vx = Math.cos(angle) * speed;
+                    p.vy = Math.sin(angle) * speed;
+                    p.life = 1500 + Math.random()*500;
+                    p.color = [Math.random(), Math.random(), Math.random(), 1];
+                }
+                break;
+        }
+    }
+
+    // Инициализация частиц для выбранного эффекта
+    function initParticles(effectType) {
+        particles = [];
+        if (effectType === "fire" || effectType === "smoke" ||
+            effectType === "rain" || effectType === "cloud") {
+            for (let i = 0; i < 300; i++) {
+                let p;
+                switch(effectType) {
+                    case "fire":
+                        p = new Particle(0, 0, 0, 0, 0, [1,1,1,1], "fire");
+                        break;
+                    case "smoke":
+                        p = new Particle(0, 0, 0, 0, 0, [0.8,0.8,0.8,1], "smoke");
+                        break;
+                    case "rain":
+                        p = new Particle(0, 0, 0, 0, 0, [0.5,0.5,1,1], "rain");
+                        break;
+                    case "cloud":
+                        p = new Particle(0, 0, 0, 0, 0, [1,1,1,1], "cloud");
+                        break;
+                }
+                resetParticle(p);
+                particles.push(p);
+            }
+        } else if (effectType === "firework") {
+            // Для фейерверка создаём ракету
+            let rocket = new Particle(0, -1, 0, 0, 2000, [1,1,1,1], "firework");
+            rocket.exploded = false;
+            resetParticle(rocket);
+            particles.push(rocket);
+        }
+    }
+
+    // При взрыве фейерверка создаём множество частиц
+    function spawnFireworkExplosion(x, y) {
+        for (let i = 0; i < 100; i++) {
+            let p = new Particle(x, y, 0, 0, 0, [1,1,1,1], "firework");
+            p.exploded = true;
+            resetParticle(p);
+            particles.push(p);
+        }
+    }
+
+    // Обновление состояния всех частиц
+    function updateParticles(delta) {
+        for (let i = 0; i < particles.length; i++) {
+            let p = particles[i];
+            if (p.effectType === "firework" && !p.exploded && p.y >= 0.5) {
+                p.exploded = true;
+                let x = p.x, y = p.y;
+                particles.splice(i, 1);
+                spawnFireworkExplosion(x, y);
+                i--;
+                continue;
+            }
+            p.update(delta);
+        }
+    }
+
+    // Буферы для передачи координат и цветов частиц
+    let positionBuffer, colorBuffer;
+    function drawScene() {
+        gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+        gl.clearColor(0, 0, 0, 1);
+        gl.clear(gl.COLOR_BUFFER_BIT);
+
+        let positions = [];
+        let colors = [];
+        for (let i = 0; i < particles.length; i++) {
+            let p = particles[i];
+            positions.push(p.x, p.y, 0);
+            colors.push(p.color[0], p.color[1], p.color[2], p.color[3]);
+        }
+
+        gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(positions), gl.DYNAMIC_DRAW);
+        gl.vertexAttribPointer(program.a_position, 3, gl.FLOAT, false, 0, 0);
+
+        gl.bindBuffer(gl.ARRAY_BUFFER, colorBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(colors), gl.DYNAMIC_DRAW);
+        gl.vertexAttribPointer(program.a_color, 4, gl.FLOAT, false, 0, 0);
+
+        // Привязка текстуры для использования в шейдере
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, texture);
+        gl.uniform1i(program.u_texture, 0);
+
+        gl.drawArrays(gl.POINTS, 0, particles.length);
+    }
+
+    function animate(time) {
+        let delta = time - lastTime;
+        lastTime = time;
+        updateParticles(delta);
+        drawScene();
+        requestAnimationFrame(animate);
+    }
+
+    function init() {
+        canvas = document.getElementById("glcanvas");
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+        gl = canvas.getContext("webgl") || canvas.getContext("experimental-webgl");
+        if (!gl) {
+            alert("Ваш браузер не поддерживает WebGL");
+            return;
+        }
+
+        // Включаем режим смешивания для прозрачности
+        gl.enable(gl.BLEND);
+        gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+
+        initShaders();
+        positionBuffer = gl.createBuffer();
+        colorBuffer = gl.createBuffer();
+
+        let projection = ortho(-1, 1, -1, 1, -1, 1);
+        let modelView = identityMatrix();
+        gl.uniformMatrix4fv(program.u_projection, false, new Float32Array(projection));
+        gl.uniformMatrix4fv(program.u_modelView, false, new Float32Array(modelView));
+
+        initParticles(effect);
+        // Загружаем текстуру и запускаем анимацию после её загрузки
+        initTexture(function(){
+            requestAnimationFrame(animate);
+        });
+    }
+
+    document.getElementById("effectSelect").addEventListener("change", function(e) {
+        effect = e.target.value;
+        initParticles(effect);
+    });
+
+    window.onload = init;
+</script>
+</body>
+</html>
